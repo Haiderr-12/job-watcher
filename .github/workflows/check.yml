@@ -1,0 +1,49 @@
+name: Check Amazon UK jobs
+
+on:
+  schedule:
+    # Every 5 minutes, offset by 3 to avoid GitHub's on-the-hour congestion.
+    # Note: GitHub may still delay scheduled runs by a few minutes when busy.
+    - cron: "3-58/5 * * * *"
+  workflow_dispatch: {}   # allows manual "Run workflow" button
+
+permissions:
+  contents: write         # needed to commit state.json back
+
+concurrency:
+  group: job-check
+  cancel-in-progress: false   # never kill a run that's mid-alert
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check for new jobs
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python check_jobs.py
+
+      - name: Save the bot's memory (state.json)
+        run: |
+          git config user.name "job-watch-bot"
+          git config user.email "job-watch-bot@users.noreply.github.com"
+          git add state.json
+          if git diff --cached --quiet; then
+            echo "state.json unchanged - nothing to commit"
+          else
+            git commit -m "Update job memory"
+            git pull --rebase origin main || true
+            git push || echo "Push failed - next run will retry"
+          fi
