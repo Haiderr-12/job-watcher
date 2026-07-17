@@ -1,5 +1,6 @@
-# TEMPORARY diagnostic v2 - will be deleted after debugging.
-# Tests alternate free routes to Amazon's job data from a GitHub runner.
+# TEMPORARY diagnostic v3 - will be deleted after debugging.
+# Tests POST-capable free relay proxies from the GitHub runner. We want any
+# relay whose own egress IP Amazon allows, that returns real job JSON.
 import json
 import time
 import urllib.parse
@@ -7,7 +8,7 @@ import uuid
 
 import requests
 
-PROXY_GQL = "https://www.jobsatamazon.co.uk/graphql"
+GQL = "https://www.jobsatamazon.co.uk/graphql"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
@@ -20,8 +21,9 @@ BODY = {
         "rangeFilters": [], "orFilters": [], "dateFilters": [],
         "sorters": [{"fieldName": "totalPayRateMax", "ascending": "false"}],
         "pageSize": 100, "consolidateSchedule": True}},
-    "query": "query searchJobCardsByLocation($searchJobRequest: SearchJobRequest!) {\n  searchJobCardsByLocation(searchJobRequest: $searchJobRequest) {\n    nextToken\n    jobCards {\n      jobId\n      jobTitle\n      city\n      postalCode\n      totalPayRateMinL10N\n      totalPayRateMaxL10N\n      __typename\n    }\n    __typename\n  }\n}\n",
+    "query": "query searchJobCardsByLocation($searchJobRequest: SearchJobRequest!) {\n  searchJobCardsByLocation(searchJobRequest: $searchJobRequest) {\n    nextToken\n    jobCards {\n      jobId\n      jobTitle\n      city\n      postalCode\n      __typename\n    }\n    __typename\n  }\n}\n",
 }
+BODY_STR = json.dumps(BODY)
 
 def gql_headers():
     return {
@@ -33,64 +35,64 @@ def gql_headers():
         "accept-language": "en-GB",
         "origin": "https://www.jobsatamazon.co.uk",
         "referer": "https://www.jobsatamazon.co.uk/",
-        "sec-ch-ua": '"Chromium";v="126", "Not)A;Brand";v="24"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-origin",
         "user-agent": UA,
         "x-amzn-requestld": str(uuid.uuid4()),
         "x-hvh-time": str(int(time.time() * 1000)),
     }
 
-print("runner IP info:")
-try:
-    print(requests.get("https://ipinfo.io/json", timeout=15).text[:300])
-except Exception as e:
-    print("EXC:", e)
+def verdict(text):
+    if "jobCards" in text or "searchJobCardsByLocation" in text:
+        return "*** JOB DATA ***"
+    low = text.lower()
+    if "waf" in low or "403" in text or "forbidden" in low:
+        return "blocked(403/WAF)"
+    if "error" in low:
+        return "error"
+    return "other"
 
-print("=" * 70)
-print("TEST A: proxy graphql with FULL browser header set")
-try:
-    r = requests.post(PROXY_GQL, json=BODY, headers=gql_headers(), timeout=30)
-    print("status:", r.status_code, "| body[:200]:", r.text[:200].replace("\n", " "))
-except Exception as e:
-    print("EXC:", e)
+def try_relay(name, fn):
+    for attempt in (1, 2):
+        try:
+            r = fn()
+            v = verdict(r.text)
+            print(f"[{name}] try{attempt}: HTTP {r.status_code} | {v} | {r.text[:110].strip()}")
+        except Exception as e:
+            print(f"[{name}] try{attempt}: EXC {type(e).__name__}: {str(e)[:90]}")
+        time.sleep(1)
 
-print("=" * 70)
-print("TEST B: graphql POST via corsproxy.io relay")
-try:
-    target = "https://corsproxy.io/?url=" + urllib.parse.quote(PROXY_GQL, safe="")
-    r = requests.post(target, json=BODY, headers=gql_headers(), timeout=45)
-    print("status:", r.status_code, "| body[:300]:", r.text[:300].replace("\n", " "))
-except Exception as e:
-    print("EXC:", e)
+# thingproxy: forwards POST + body
+try_relay("thingproxy", lambda: requests.post(
+    "https://thingproxy.freeboard.io/fetch/" + GQL,
+    data=BODY_STR, headers=gql_headers(), timeout=40))
 
-print("=" * 70)
-print("TEST C: r.jina.ai reader (renders the page from their servers)")
-try:
-    r = requests.get("https://r.jina.ai/https://www.jobsatamazon.co.uk/app%23/jobSearch",
-                     timeout=90, headers={"user-agent": UA})
-    print("status:", r.status_code, "| len:", len(r.text))
-    print("body[:500]:", r.text[:500].replace("\n", " "))
-except Exception as e:
-    print("EXC:", e)
+# codetabs: proxy, try POST passthrough
+try_relay("codetabs", lambda: requests.post(
+    "https://api.codetabs.com/v1/proxy/?quest=" + GQL,
+    data=BODY_STR, headers=gql_headers(), timeout=40))
 
-print("=" * 70)
-print("TEST D: AppSync endpoints direct from runner")
-for url in [
-    "https://rmr7khwyhzhgpd66fo6ywhjkma.appsync-api.eu-west-1.amazonaws.com/graphql",
-    "https://aubvydm7hvgezbr5vteeofwvyq.appsync-api.eu-west-1.amazonaws.com/graphql",
-    "https://zal7yl6nnfbw5proqwewrldupe.appsync-api.eu-west-1.amazonaws.com/graphql",
-    "https://qy64m4juabaffl7tjakii4gdoa.appsync-api.eu-west-1.amazonaws.com/graphql",
-]:
-    tag = url.split("//")[1].split(".")[0][:10]
-    try:
-        r = requests.post(url, json=BODY, headers=gql_headers(), timeout=20)
-        print(f"{tag}: HTTP {r.status_code} | {r.text[:120]}".replace("\n", " "))
-    except Exception as e:
-        print(f"{tag}: EXC {type(e).__name__}")
+# allorigins raw: try POST
+try_relay("allorigins", lambda: requests.post(
+    "https://api.allorigins.win/raw?url=" + urllib.parse.quote(GQL, safe=""),
+    data=BODY_STR, headers=gql_headers(), timeout=40))
 
-print("=" * 70)
+# corsproxy.org
+try_relay("corsproxy.org", lambda: requests.post(
+    "https://corsproxy.org/?" + urllib.parse.quote(GQL, safe=""),
+    data=BODY_STR, headers=gql_headers(), timeout=40))
+
+# cors.eu.org
+try_relay("cors.eu.org", lambda: requests.post(
+    "https://cors.eu.org/" + GQL,
+    data=BODY_STR, headers=gql_headers(), timeout=40))
+
+# proxy.cors.sh
+try_relay("cors.sh", lambda: requests.post(
+    "https://proxy.cors.sh/" + GQL,
+    data=BODY_STR, headers=gql_headers(), timeout=40))
+
+# test.cors.workers.dev (Cloudflare worker relay)
+try_relay("cf-worker", lambda: requests.post(
+    "https://test.cors.workers.dev/?" + GQL,
+    data=BODY_STR, headers=gql_headers(), timeout=40))
+
 print("done")
