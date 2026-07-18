@@ -5,6 +5,13 @@ every 5 minutes and sends a Discord ping (with `@everyone`) the moment a new
 job appears near East London. It runs for free on GitHub Actions — no computer
 needs to be on.
 
+Amazon blocks requests coming straight from cloud servers (like GitHub's),
+so the bot forwards its request through a free public relay
+(`proxy.cors.sh`) whose address Amazon accepts. If that relay ever stops
+working, the bot automatically tries the site directly and then a headless
+browser, and it will post a ⚠️ warning in Discord if every method fails 4
+checks in a row (so a silent breakage can't go unnoticed).
+
 ## Change what you get alerted about
 
 Edit the **CONFIG** block at the top of [`check_jobs.py`](check_jobs.py)
