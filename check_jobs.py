@@ -92,52 +92,90 @@ JOB_QUERY = """query searchJobCardsByLocation($searchJobRequest: SearchJobReques
 # Reading jobs — primary path: call the API directly (fast, no browser)
 # ----------------------------------------------------------------------------
 
-def fetch_jobs_direct():
-    """Return a list of raw job cards, following pagination. Raises on failure."""
+# Amazon's firewall blocks datacenter IPs (including GitHub's servers), so a
+# plain call from the cloud is refused with "403 Forbidden". To get around
+# that we can forward the request through a free public relay whose own IP
+# Amazon allows. We try the direct call first (it works from a home/UK
+# connection, e.g. when you test on your PC), then each relay in turn.
+# A relay entry is a URL prefix that gets stuck in front of the real address.
+RELAYS = [
+    "",                          # direct — no relay (works from a home IP)
+    "https://proxy.cors.sh/",    # free relay that forwards from an allowed IP
+]
+
+
+def _search_page(relay, next_token):
+    """Do one API call (optionally via a relay) and return the result block."""
+    request_vars = {
+        "locale": "en-GB",
+        "country": "United Kingdom",
+        "keyWords": "",
+        "equalFilters": [],
+        "containFilters": [{"key": "isPrivateSchedule", "val": ["true", "false"]}],
+        "rangeFilters": [],
+        "orFilters": [],
+        "dateFilters": [],
+        "sorters": [{"fieldName": "totalPayRateMax", "ascending": "false"}],
+        "pageSize": 100,
+        "consolidateSchedule": True,
+    }
+    if next_token:
+        request_vars["nextToken"] = next_token
+    headers = {
+        # This is the site's own anonymous-visitor token, not a secret.
+        "authorization": "Bearer Status|unauthenticated|Session|",
+        "content-type": "application/json",
+        "country": "United Kingdom",
+        "iscanary": "false",
+        "accept": "*/*",
+        "accept-language": "en-GB",
+        "origin": "https://www.jobsatamazon.co.uk",
+        "referer": "https://www.jobsatamazon.co.uk/",
+        "user-agent": USER_AGENT,
+        "x-amzn-requestld": str(uuid.uuid4()),
+        "x-hvh-time": str(int(time.time() * 1000)),
+    }
+    body = {
+        "operationName": "searchJobCardsByLocation",
+        "variables": {"searchJobRequest": request_vars},
+        "query": JOB_QUERY,
+    }
+    resp = requests.post(relay + GRAPHQL_URL, json=body, headers=headers, timeout=40)
+    resp.raise_for_status()
+    payload = resp.json()
+    # A relay that itself errors may return HTML or an error object, not our
+    # data — treat anything without the expected shape as a failure.
+    if "errors" in payload and not payload.get("data"):
+        raise RuntimeError(f"API returned errors: {str(payload['errors'])[:120]}")
+    return payload["data"]["searchJobCardsByLocation"]
+
+
+def _fetch_all_pages(relay):
+    """Follow pagination for one transport. Returns a list of raw cards."""
     cards = []
     next_token = None
     for _page in range(20):  # safety cap on pages
-        request_vars = {
-            "locale": "en-GB",
-            "country": "United Kingdom",
-            "keyWords": "",
-            "equalFilters": [],
-            "containFilters": [{"key": "isPrivateSchedule", "val": ["true", "false"]}],
-            "rangeFilters": [],
-            "orFilters": [],
-            "dateFilters": [],
-            "sorters": [{"fieldName": "totalPayRateMax", "ascending": "false"}],
-            "pageSize": 100,
-            "consolidateSchedule": True,
-        }
-        if next_token:
-            request_vars["nextToken"] = next_token
-        headers = {
-            # This is the site's own anonymous-visitor token, not a secret.
-            "authorization": "Bearer Status|unauthenticated|Session|",
-            "content-type": "application/json",
-            "country": "United Kingdom",
-            "iscanary": "false",
-            "accept": "*/*",
-            "accept-language": "en-GB",
-            "referer": "https://www.jobsatamazon.co.uk/app",
-            "user-agent": USER_AGENT,
-            "x-amzn-requestld": str(uuid.uuid4()),
-            "x-hvh-time": str(int(time.time() * 1000)),
-        }
-        body = {
-            "operationName": "searchJobCardsByLocation",
-            "variables": {"searchJobRequest": request_vars},
-            "query": JOB_QUERY,
-        }
-        resp = requests.post(GRAPHQL_URL, json=body, headers=headers, timeout=30)
-        resp.raise_for_status()
-        result = resp.json()["data"]["searchJobCardsByLocation"]
-        cards.extend(result["jobCards"])  # KeyError here = failure, caught upstream
+        result = _search_page(relay, next_token)
+        cards.extend(result["jobCards"])
         next_token = result.get("nextToken")
         if not next_token:
             break
     return cards
+
+
+def fetch_jobs_api():
+    """Try the direct API, then each relay. Returns (cards, label).
+    Raises RuntimeError only if every transport fails."""
+    errors = []
+    for relay in RELAYS:
+        try:
+            cards = _fetch_all_pages(relay)
+            return cards, ("direct API" if not relay else f"relay {relay}")
+        except Exception as e:
+            label = relay or "direct"
+            errors.append(f"{label}: {type(e).__name__}: {e}")
+            print(f"  transport failed [{label}]: {type(e).__name__}: {e}")
+    raise RuntimeError("all API transports failed:\n  " + "\n  ".join(errors))
 
 
 # ----------------------------------------------------------------------------
@@ -324,13 +362,12 @@ def main():
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     ping = "@everyone " if PING_EVERYONE else ""
 
-    # --- Read the job list (direct API first, then browser fallback) -------
+    # --- Read the job list (direct/relay API first, then browser fallback) -
     cards, how = None, None
     try:
-        cards = fetch_jobs_direct()
-        how = "direct API"
+        cards, how = fetch_jobs_api()
     except Exception as e:
-        print(f"Direct API read failed: {type(e).__name__}: {e}")
+        print(f"API read failed: {type(e).__name__}: {e}")
         try:
             cards = fetch_jobs_playwright()
             how = "Playwright fallback"
