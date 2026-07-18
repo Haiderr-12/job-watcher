@@ -2,6 +2,6 @@
   "seen": {},
   "fails": 0,
   "fail_alerted": false,
-  "announced": false,
+  "announced": true,
   "heartbeat": "2026-07-18"
 }
