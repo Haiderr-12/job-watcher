@@ -3,7 +3,8 @@ name: Check Amazon UK jobs
 on:
   schedule:
     # Every 5 minutes, offset by 3 to avoid GitHub's on-the-hour congestion.
-    # Note: GitHub may still delay scheduled runs by a few minutes when busy.
+    # Note: GitHub may still delay scheduled runs by a few minutes when busy,
+    # so in practice expect a check every 5-15 minutes.
     - cron: "3-58/5 * * * *"
   workflow_dispatch: {}   # allows manual "Run workflow" button
 

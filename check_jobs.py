@@ -41,6 +41,13 @@ LOCATION_TERMS = [
 # Empty list [] = all roles.
 TITLE_KEYWORDS = []
 
+# Amazon hides some jobs from the general list and only shows them when you
+# search with a postcode. So as well as the UK-wide list, the bot repeats the
+# site's own "within 30 miles of IG3 9TQ" search (these are the map
+# coordinates for that postcode). Any job found this way counts as a location
+# match automatically. Set GEO_SEARCH = None to turn this off.
+GEO_SEARCH = {"lat": 51.561284508352, "lng": 0.099960733252, "distance_miles": 30}
+
 # Start each alert with @everyone so Discord pushes a phone notification.
 PING_EVERYONE = True
 
@@ -105,7 +112,7 @@ RELAYS = [
 ]
 
 
-def _search_page(relay, next_token):
+def _search_page(relay, next_token, geo=None):
     """Do one API call (optionally via a relay) and return the result block."""
     request_vars = {
         "locale": "en-GB",
@@ -120,6 +127,13 @@ def _search_page(relay, next_token):
         "pageSize": 100,
         "consolidateSchedule": True,
     }
+    if geo:
+        # Mirror the site's own postcode search exactly (it sends no sorters).
+        request_vars["geoQueryClause"] = {
+            "lat": geo["lat"], "lng": geo["lng"],
+            "unit": "mi", "distance": geo["distance_miles"],
+        }
+        request_vars["sorters"] = []
     if next_token:
         request_vars["nextToken"] = next_token
     headers = {
@@ -151,12 +165,12 @@ def _search_page(relay, next_token):
     return payload["data"]["searchJobCardsByLocation"]
 
 
-def _fetch_all_pages(relay):
+def _fetch_all_pages(relay, geo=None):
     """Follow pagination for one transport. Returns a list of raw cards."""
     cards = []
     next_token = None
     for _page in range(20):  # safety cap on pages
-        result = _search_page(relay, next_token)
+        result = _search_page(relay, next_token, geo=geo)
         cards.extend(result["jobCards"])
         next_token = result.get("nextToken")
         if not next_token:
@@ -165,13 +179,21 @@ def _fetch_all_pages(relay):
 
 
 def fetch_jobs_api():
-    """Try the direct API, then each relay. Returns (cards, label).
+    """Run the UK-wide search AND the postcode-radius search (if configured).
+    Tries the direct API, then each relay. Returns (cards, geo_ids, label)
+    where geo_ids is the set of jobIds found by the radius search.
     Raises RuntimeError only if every transport fails."""
     errors = []
     for relay in RELAYS:
         try:
             cards = _fetch_all_pages(relay)
-            return cards, ("direct API" if not relay else f"relay {relay}")
+            geo_ids = set()
+            if GEO_SEARCH:
+                geo_cards = _fetch_all_pages(relay, geo=GEO_SEARCH)
+                geo_ids = {c.get("jobId") for c in geo_cards}
+                known = {c.get("jobId") for c in cards}
+                cards.extend(c for c in geo_cards if c.get("jobId") not in known)
+            return cards, geo_ids, ("direct API" if not relay else f"relay {relay}")
         except Exception as e:
             label = relay or "direct"
             errors.append(f"{label}: {type(e).__name__}: {e}")
@@ -270,8 +292,10 @@ def normalise(card):
     }
 
 
-def matches_filters(job):
-    if LOCATION_TERMS:
+def matches_filters(job, in_radius=False):
+    # Jobs found by the postcode-radius search are near you by definition;
+    # otherwise a LOCATION_TERMS word must appear somewhere.
+    if LOCATION_TERMS and not in_radius:
         haystack = " ".join([job["title"], job["city"], job["postalCode"],
                              job["locationName"]]).lower()
         if not any(term.lower() in haystack for term in LOCATION_TERMS):
@@ -366,9 +390,9 @@ def main():
     ping = "@everyone " if PING_EVERYONE else ""
 
     # --- Read the job list (direct/relay API first, then browser fallback) -
-    cards, how = None, None
+    cards, geo_ids, how = None, set(), None
     try:
-        cards, how = fetch_jobs_api()
+        cards, geo_ids, how = fetch_jobs_api()
     except Exception as e:
         print(f"API read failed: {type(e).__name__}: {e}")
         try:
@@ -401,7 +425,8 @@ def main():
     state["fail_alerted"] = False
 
     jobs = [normalise(c) for c in cards]
-    matching = [j for j in jobs if j["jobId"] and matches_filters(j)]
+    matching = [j for j in jobs
+                if j["jobId"] and matches_filters(j, in_radius=j["jobId"] in geo_ids)]
     new_jobs = [j for j in matching if j["jobId"] not in state["seen"]]
     print(f"{len(matching)} match filters; {len(new_jobs)} new.")
 
