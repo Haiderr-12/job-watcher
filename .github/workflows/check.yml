@@ -2,14 +2,16 @@ name: Check Amazon UK jobs
 
 on:
   schedule:
-    # Every 5 minutes, offset by 3 to avoid GitHub's on-the-hour congestion.
-    # Note: GitHub may still delay scheduled runs by a few minutes when busy,
-    # so in practice expect a check every 5-15 minutes.
+    # GitHub's free cron is unreliable (often delayed or skipped), so the
+    # real 5-minute cycle comes from the last step below: each run triggers
+    # the next one. This cron is just a BACKUP that restarts the chain if it
+    # ever breaks.
     - cron: "3-58/5 * * * *"
-  workflow_dispatch: {}   # allows manual "Run workflow" button
+  workflow_dispatch: {}   # allows manual "Run workflow" button + self-trigger
 
 permissions:
   contents: write         # needed to commit state.json back
+  actions: write          # needed so a run can trigger the next run
 
 concurrency:
   group: job-check
@@ -47,4 +49,20 @@ jobs:
             git commit -m "Update job memory"
             git pull --rebase origin main || true
             git push || echo "Push failed - next run will retry"
+          fi
+
+      - name: Trigger the next check in ~4 minutes (self-scheduling chain)
+        if: always()   # keep the chain alive even if a step above failed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 240
+          # If another run is already waiting (e.g. the backup cron fired),
+          # let that one carry the chain instead of starting a duplicate.
+          queued=$(gh run list --workflow check.yml --status queued --json databaseId --jq 'length')
+          if [ "$queued" -gt 0 ]; then
+            echo "another run is already queued - not dispatching a new one"
+          else
+            gh workflow run check.yml --ref main
+            echo "next check dispatched"
           fi
