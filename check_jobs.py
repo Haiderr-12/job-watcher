@@ -34,6 +34,7 @@ LOCATION_TERMS = [
     "ilford", "romford", "barking", "dagenham", "rainham", "london",
     "tilbury", "grays", "purfleet", "basildon", "thurrock", "essex",
     "dartford", "erith", "belvedere", "enfield", "croydon", "weybridge",
+    "wembley", "hounslow", "heathrow", "slough", "watford", "hemel",
 ]
 
 # Only alert for jobs whose TITLE contains one of these words.
