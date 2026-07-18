@@ -352,7 +352,9 @@ def save_state(state):
 # ----------------------------------------------------------------------------
 
 def main():
-    webhook = os.environ.get("DISCORD_WEBHOOK", "").strip()
+    # Strip whitespace and any stray BOM / zero-width chars that can sneak in
+    # when a secret is pasted or set from a shell (﻿ = BOM).
+    webhook = os.environ.get("DISCORD_WEBHOOK", "").strip().strip("﻿​").strip()
     if not webhook:
         print("ERROR: DISCORD_WEBHOOK environment variable is not set.")
         return 1
