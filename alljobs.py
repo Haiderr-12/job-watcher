@@ -30,7 +30,7 @@ import requests
 # Where to search from, and how far out (miles). ~10 miles ≈ 1 hour by local
 # transport from Ilford (IG3).
 WHERE = "Ilford"
-DISTANCE_MILES = 10
+DISTANCE_MILES = 12
 
 # Only alert for jobs paying at least this much per hour. Set to 0 to turn the
 # pay filter off. NOTE: many listings don't state a wage, so this uses
@@ -60,6 +60,21 @@ EXCLUDE_TITLE_WORDS = [
     "manager", "supervisor", "team leader", "engineer", "graduate",
     "analyst", "coordinator", "specialist", "consultant", "director",
     "executive", "head of", "architect", "chef",
+]
+
+# Read each job's description and drop it if it asks for experience/skills —
+# UNLESS it also says training is given / no experience needed.
+KEEP_IF_PHRASE = [
+    "no experience", "without experience", "no previous experience",
+    "full training", "training provided", "training is provided",
+    "training will be provided", "no experience necessary",
+]
+EXCLUDE_IF_PHRASE = [
+    "experience required", "experience is required", "previous experience",
+    "proven experience", "years experience", "years of experience",
+    "years' experience", "must have experience", "relevant experience",
+    "experience essential", "experience is essential", "experienced",
+    "skills required", "must have", "essential experience",
 ]
 
 # Only alert for jobs posted within this many days.
@@ -147,12 +162,18 @@ def normalise(job):
         "category": cat,
         "pay": pay,
         "link": job.get("redirect_url") or "https://www.adzuna.co.uk",
+        "desc": job.get("description") or "",
     }
 
 
 def wanted(job):
     title = job["title"].lower()
-    return not any(word in title for word in EXCLUDE_TITLE_WORDS)
+    if any(word in title for word in EXCLUDE_TITLE_WORDS):
+        return False
+    text = (title + " " + job["desc"]).lower()
+    if any(p in text for p in KEEP_IF_PHRASE):
+        return True  # explicitly no-experience / training given
+    return not any(p in text for p in EXCLUDE_IF_PHRASE)
 
 
 # ----------------------------------------------------------------------------
