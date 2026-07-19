@@ -1,0 +1,65 @@
+name: Check all jobs near London
+
+on:
+  schedule:
+    # Backup only - the real cycle comes from the self-trigger step below.
+    - cron: "1-56/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: alljobs-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check for new jobs
+        env:
+          DISCORD_WEBHOOK_JOBS: ${{ secrets.DISCORD_WEBHOOK_JOBS }}
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+        run: python alljobs.py
+
+      - name: Save the bot's memory (alljobs_state.json)
+        run: |
+          git config user.name "job-watch-bot"
+          git config user.email "job-watch-bot@users.noreply.github.com"
+          git add alljobs_state.json
+          if git diff --cached --quiet; then
+            echo "state unchanged - nothing to commit"
+          else
+            git commit -m "Update all-jobs memory"
+            git pull --rebase origin main || true
+            git push || echo "Push failed - next run will retry"
+          fi
+
+      - name: Trigger the next check in ~4 minutes (self-scheduling chain)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 240
+          queued=$(gh run list --workflow alljobs.yml --status queued --json databaseId --jq 'length')
+          if [ "$queued" -gt 0 ]; then
+            echo "another run already queued - not dispatching"
+          else
+            gh workflow run alljobs.yml --ref main
+            echo "next check dispatched"
+          fi

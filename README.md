@@ -1,4 +1,22 @@
-# Amazon UK Job Watch
+# Job Watch
+
+Two small bots that run for free on GitHub Actions (no computer needs to be
+on) and ping Discord when a matching job appears:
+
+1. **Amazon watcher** ([`check_jobs.py`](check_jobs.py)) — watches
+   jobsatamazon.co.uk and pings within minutes; details below.
+2. **All-jobs watcher** ([`alljobs.py`](alljobs.py)) — the wide net. Uses the
+   free [Adzuna](https://developer.adzuna.com) API to watch entry-level,
+   no-CV, no-driving jobs (warehouse, retail, hospitality, cleaning) across
+   every employer and agency near Ilford, checked every ~15 minutes. Edit the
+   **CONFIG** block at the top of `alljobs.py` to change the area
+   (`WHERE`/`DISTANCE_MILES`), the `CATEGORIES`, or the words that filter jobs
+   out (`EXCLUDE_TITLE_WORDS`). It posts to a separate Discord channel
+   (secret `DISCORD_WEBHOOK_JOBS`) and needs `ADZUNA_APP_ID` / `ADZUNA_APP_KEY`
+   secrets. Adzuna re-indexes other boards so its data lags a few hours — fine
+   for these longer-lived roles.
+
+## Amazon UK Job Watch
 
 A small bot that checks [jobsatamazon.co.uk](https://www.jobsatamazon.co.uk/app#/jobSearch)
 every 5 minutes and sends a Discord ping (with `@everyone`) the moment a new
