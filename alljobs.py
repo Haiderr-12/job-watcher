@@ -27,9 +27,17 @@ import requests
 # CONFIG — edit this block to change what you get alerted about
 # ============================================================================
 
-# Where to search from, and how far out (miles).
+# Where to search from, and how far out (miles). ~10 miles ≈ 1 hour by local
+# transport from Ilford (IG3).
 WHERE = "Ilford"
-DISTANCE_MILES = 15
+DISTANCE_MILES = 10
+
+# Only alert for jobs paying at least this much per hour. Set to 0 to turn the
+# pay filter off. NOTE: many listings don't state a wage, so this uses
+# Adzuna's salary figure/estimate and assumes the hours below — it's a helpful
+# bias toward better-paid roles, not an exact guarantee.
+MIN_HOURLY_PAY = 15
+ASSUMED_HOURS_PER_WEEK = 37.5   # used to convert the hourly floor to a yearly one
 
 # Which Adzuna job categories to watch. Full list of tags is printed by the
 # Adzuna "categories" endpoint; these are the entry-level, no-experience ones.
@@ -48,10 +56,10 @@ EXCLUDE_TITLE_WORDS = [
     # driving
     "driver", "driving", "hgv", "lgv", "7.5", "class 1", "class 2",
     "cat c", "c+e", "multidrop", "van ",
-    # senior / experienced
+    # senior / experienced (these usually need a CV or experience)
     "manager", "supervisor", "team leader", "engineer", "graduate",
     "analyst", "coordinator", "specialist", "consultant", "director",
-    "executive", "head of", "architect",
+    "executive", "head of", "architect", "chef",
 ]
 
 # Only alert for jobs posted within this many days.
@@ -94,6 +102,9 @@ def fetch_category(app_id, app_key, category):
         "what_exclude": "driver driving hgv van",  # server-side pre-filter
         "content-type": "application/json",
     }
+    if MIN_HOURLY_PAY > 0:
+        # Convert the hourly floor to a yearly one Adzuna understands.
+        params["salary_min"] = int(MIN_HOURLY_PAY * ASSUMED_HOURS_PER_WEEK * 52)
     resp = requests.get(ADZUNA_URL, params=params, timeout=30)
     resp.raise_for_status()
     return resp.json().get("results", [])
