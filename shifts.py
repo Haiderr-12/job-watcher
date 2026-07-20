@@ -32,7 +32,7 @@ import check_jobs as cj  # reuse RELAYS, transport, USER_AGENT, GRAPHQL_URL
 
 # Exact job(s) you've applied to. Paste the jobId from the job's web address
 # (the bit after "jobId="), e.g. "JOB-UK-0000001234". You can list several.
-WATCH_JOB_IDS = []
+WATCH_JOB_IDS = ["JOB-UK-0000000307"]  # your Tilbury application
 
 # Also auto-watch every Amazon job near this point. Coordinates below are
 # Tilbury (RM18); 25 miles covers Tilbury, Dartford, Rainham, Dagenham,
