@@ -1,5 +1,7 @@
 {
-  "seen_shifts": {},
+  "seen_shifts": {
+    "SCH-UK-0000035335": "2026-07-20"
+  },
   "fails": 0,
   "fail_alerted": false,
   "announced": true,
