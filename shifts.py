@@ -263,16 +263,25 @@ def main():
     state["fail_alerted"] = False
 
     label = WATCH_NEAR["label"] if WATCH_NEAR else "your saved jobs"
-    print(f"Checked {len(job_ids)} job(s); {len(schedules)} schedule(s) open now.")
 
-    new = [s for s in schedules if s.get("scheduleId")
+    # Only count a shift as catchable if it actually has slots open. A shift
+    # that shows 0 available isn't bookable yet; if it later opens up it will
+    # (correctly) look "new" again and alert then.
+    def bookable(s):
+        cnt = s.get("laborDemandAvailableCount")
+        return cnt is None or cnt > 0
+
+    open_now = [s for s in schedules if bookable(s)]
+    print(f"Checked {len(job_ids)} job(s); {len(open_now)} bookable shift(s) now.")
+
+    new = [s for s in open_now if s.get("scheduleId")
            and s["scheduleId"] not in state["seen_shifts"]]
 
     if not state["announced"]:
         discord_send(webhook, content=(
             f"{ping}✅ Amazon shift watch is live — watching {label}"
             f"{' + your job(s)' if WATCH_JOB_IDS else ''}. "
-            f"{len(schedules)} shift(s) open right now; I'll ping you the "
+            f"{len(open_now)} shift(s) open right now; I'll ping you the "
             "moment a new one appears, even overnight."))
         state["announced"] = True
         time.sleep(1)
