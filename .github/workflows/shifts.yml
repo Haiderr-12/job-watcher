@@ -1,0 +1,63 @@
+name: Check Amazon shifts
+
+on:
+  schedule:
+    # Backup only - the real cycle comes from the self-trigger step below.
+    - cron: "2-57/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: shifts-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check for open shifts
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python shifts.py
+
+      - name: Save the bot's memory (shifts_state.json)
+        run: |
+          git config user.name "job-watch-bot"
+          git config user.email "job-watch-bot@users.noreply.github.com"
+          git add shifts_state.json
+          if git diff --cached --quiet; then
+            echo "state unchanged - nothing to commit"
+          else
+            git commit -m "Update shift memory"
+            git pull --rebase origin main || true
+            git push || echo "Push failed - next run will retry"
+          fi
+
+      - name: Trigger the next check in ~4 minutes (self-scheduling chain)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 240
+          queued=$(gh run list --workflow shifts.yml --status queued --json databaseId --jq 'length')
+          if [ "$queued" -gt 0 ]; then
+            echo "another run already queued - not dispatching"
+          else
+            gh workflow run shifts.yml --ref main
+            echo "next check dispatched"
+          fi
