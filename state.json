@@ -11,7 +11,7 @@
     "JOB-UK-0000000160": "2026-07-20",
     "JOB-UK-0000000202": "2026-07-21"
   },
-  "fails": 0,
+  "fails": 1,
   "fail_alerted": false,
   "announced": true,
   "heartbeat": "2026-07-21"
