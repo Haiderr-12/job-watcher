@@ -205,7 +205,7 @@
     "5813436614": "2026-07-24",
     "5813436644": "2026-07-24"
   },
-  "fails": 0,
+  "fails": 1,
   "fail_alerted": false,
   "announced": true,
   "heartbeat": "2026-09-05",
